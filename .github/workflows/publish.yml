@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           git clone --depth 1 --branch ${{ inputs.branch }} \
-            https://x-access-token:${{ secrets.PRIVATE_REPO_PAT }}@github.com/Pritraj/Record-Bill.git .
+            https://x-access-token:${{ secrets.PRIVATE_REPO_PAT }}@github.com/Pritraj/record-bill.git .
 
       # ─── Common setup ───
       - name: Install Node.js
