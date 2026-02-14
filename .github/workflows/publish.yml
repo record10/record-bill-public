@@ -1,11 +1,3 @@
-# Place this file at .github/workflows/release.yml in the PUBLIC repo (Record10/record-bill)
-# Builds are free & unlimited on public repos.
-#
-# REQUIRED SECRETS (set in Record10/record-bill → Settings → Secrets):
-#   - PRIVATE_REPO_PAT         : GitHub PAT with repo scope to clone Pritraj/Record-Bill
-#   - TAURI_SIGNING_PRIVATE_KEY : Tauri update signing key
-#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD : Password for the signing key
-#
 name: Release
 
 on:
