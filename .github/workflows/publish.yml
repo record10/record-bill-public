@@ -1,0 +1,156 @@
+# Place this file at .github/workflows/release.yml in the PUBLIC repo (Record10/record-bill)
+# Builds are free & unlimited on public repos.
+#
+# REQUIRED SECRETS (set in Record10/record-bill → Settings → Secrets):
+#   - PRIVATE_REPO_PAT         : GitHub PAT with repo scope to clone Pritraj/Record-Bill
+#   - TAURI_SIGNING_PRIVATE_KEY : Tauri update signing key
+#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD : Password for the signing key
+#
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to build from (private repo)"
+        required: true
+        default: "qa"
+        type: choice
+        options:
+          - qa
+          - main
+      version_override:
+        description: "Version override (leave empty to read from tauri.conf.json)"
+        required: false
+        type: string
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: desktop
+          - platform: macos-latest
+            target: android
+          - platform: windows-latest
+            target: desktop
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      # ─── Clone source from private repo ───
+      - name: Clone private repository
+        shell: bash
+        run: |
+          git clone --depth 1 --branch ${{ inputs.branch }} \
+            https://x-access-token:${{ secrets.PRIVATE_REPO_PAT }}@github.com/Pritraj/Record-Bill.git .
+
+      # ─── Common setup ───
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'android' && 'aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android' || '' }}
+
+      # ─── Android-specific setup (macOS + android target only) ───
+      - name: Install Java (Android only)
+        if: matrix.target == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      - name: Setup Android SDK
+        if: matrix.target == 'android'
+        uses: android-actions/setup-android@v3
+
+      # ─── Build frontend ───
+      - name: Install frontend dependencies
+        run: npm install
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+      # ─── Version & release config ───
+      - name: Get Version
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=$(grep '"version":' tauri/tauri.conf.json | head -n 1 | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+          if [[ -n "${{ inputs.version_override }}" ]]; then
+            VERSION="${{ inputs.version_override }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Determine Release Config
+        id: release_config
+        shell: bash
+        run: |
+          if [[ "${{ inputs.branch }}" == "qa" ]]; then
+            echo "type=qa" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "tag=v${{ steps.get_version.outputs.version }}-qa.${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+            # Merge QA config
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              choco install jq -y
+            fi
+            jq -s '.[0] * .[1]' tauri/tauri.conf.json tauri/tauri.conf.qa.json > tauri/tauri.conf.merged.json
+            mv tauri/tauri.conf.merged.json tauri/tauri.conf.json
+          else
+            echo "type=prod" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "tag=v${{ steps.get_version.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      # ─── Windows workaround ───
+      - name: Workaround for Android/deep-link on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # Rename gen/android so tauri-build doesn't try to write tauri.settings.gradle
+          mv tauri/gen/android tauri/gen/_android_disabled
+          # Remove deep-link config to prevent plugin panic on Windows
+          jq 'del(.plugins."deep-link")' tauri/tauri.conf.json > tauri/tauri.conf.temp.json
+          mv tauri/tauri.conf.temp.json tauri/tauri.conf.json
+
+      # ─── Desktop build (macOS or Windows) ───
+      - name: Build Tauri Desktop App
+        if: matrix.target == 'desktop'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ steps.release_config.outputs.tag }}
+          releaseName: "App ${{ steps.release_config.outputs.tag }}"
+          releaseBody: "See the assets to download this version and install."
+          releaseDraft: false
+          prerelease: ${{ steps.release_config.outputs.prerelease }}
+
+      # ─── Android build (macOS only) ───
+      - name: Build Android APK
+        if: matrix.target == 'android'
+        run: |
+          chmod +x tauri/gen/android/gradlew
+          npm run build:android
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
+
+      - name: Upload Android APK
+        if: matrix.target == 'android'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.release_config.outputs.tag }}
+          files: |
+            tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
