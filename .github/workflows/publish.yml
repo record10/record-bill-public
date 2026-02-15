@@ -190,11 +190,6 @@ jobs:
           echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/signing.properties
           echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/signing.properties
 
-          echo "DEBUG: Verifying keystore.properties..."
-          cat tauri/gen/android/keystore.properties
-          echo "DEBUG: Verifying keystore file..."
-          ls -l "$TEMP_DIR/release.keystore"
-
       - name: Build Android APK
         if: matrix.target == 'android'
         shell: bash
