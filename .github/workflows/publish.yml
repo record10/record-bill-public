@@ -147,43 +147,48 @@ jobs:
         if: matrix.target == 'android'
         shell: bash
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${{ runner.temp }}/release.keystore"
-          ls -l "${{ runner.temp }}/release.keystore"
+          TEMP_DIR="$(cygpath -u "${{ runner.temp }}" 2>/dev/null || echo "${{ runner.temp }}")"
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$TEMP_DIR/release.keystore"
+          ls -l "$TEMP_DIR/release.keystore"
 
       - name: Configure Gradle Properties
         if: matrix.target == 'android'
         shell: bash
         run: |
+          TEMP_DIR="$(cygpath -u "${{ runner.temp }}" 2>/dev/null || echo "${{ runner.temp }}")"
+          # Convert to native path for Gradle/Java (they need Windows paths)
+          NATIVE_TEMP="${{ runner.temp }}"
+
           mkdir -p $HOME/.gradle
-          # Write to User Home (Standard)
-          echo "ANDROID_KEYSTORE_FILE=${{ runner.temp }}/release.keystore" >> $HOME/.gradle/gradle.properties
+          # Write to User Home (Standard) - use native path for Gradle
+          echo "ANDROID_KEYSTORE_FILE=$NATIVE_TEMP/release.keystore" >> $HOME/.gradle/gradle.properties
           echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/.gradle/gradle.properties
           echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/.gradle/gradle.properties
           echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/.gradle/gradle.properties
 
           # Write to Project Root (tauri/gen/android/gradle.properties) - Backup ensuring visibility
-          echo "ANDROID_KEYSTORE_FILE=${{ runner.temp }}/release.keystore" >> tauri/gen/android/gradle.properties
+          echo "ANDROID_KEYSTORE_FILE=$NATIVE_TEMP/release.keystore" >> tauri/gen/android/gradle.properties
           echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/gradle.properties
           echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/gradle.properties
           echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/gradle.properties
 
           # Write to Tauri Root (tauri/keystore.properties) - File fallback
-          echo "storeFile=${{ runner.temp }}/release.keystore" > tauri/keystore.properties
+          echo "storeFile=$NATIVE_TEMP/release.keystore" > tauri/keystore.properties
           echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/keystore.properties
           echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/keystore.properties
           echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/keystore.properties
 
           # Write to HOME directly (Safer than repo, persists)
-          echo "storeFile=${{ runner.temp }}/release.keystore" > $HOME/keystore.properties
+          echo "storeFile=$NATIVE_TEMP/release.keystore" > $HOME/keystore.properties
           echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/keystore.properties
           echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/keystore.properties
           echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/keystore.properties
 
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> ${{ runner.temp }}/signing.properties
-          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> ${{ runner.temp }}/signing.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$TEMP_DIR/signing.properties"
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$TEMP_DIR/signing.properties"
 
           # Write to Android Project Root (tauri/gen/android)
-          echo "storeFile=${{ runner.temp }}/release.keystore" > tauri/gen/android/signing.properties
+          echo "storeFile=$NATIVE_TEMP/release.keystore" > tauri/gen/android/signing.properties
           echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/signing.properties
           echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/signing.properties
           echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/signing.properties
