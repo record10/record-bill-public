@@ -156,6 +156,8 @@ jobs:
         run: |
           cd tauri
           ../frontend/node_modules/.bin/tauri android build --aab true --target aarch64
+          mkdir -p ../build-artifacts
+          find gen/android/app/build/outputs/bundle -name "*.aab" -exec mv {} ../build-artifacts/ \;
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -163,14 +165,32 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      - name: Find AAB file
+      - name: Build Android APK
         if: matrix.target == 'android'
-        id: find_aab
         shell: bash
         run: |
-          AAB_PATH=$(find tauri/gen/android/app/build/outputs/bundle -name "*.aab" | head -1)
+          cd tauri
+          ../frontend/node_modules/.bin/tauri android build --apk true --target aarch64
+          mkdir -p ../build-artifacts
+          find gen/android/app/build/outputs/apk -name "*.apk" -exec mv {} ../build-artifacts/ \;
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Find Android build artifacts
+        if: matrix.target == 'android'
+        id: find_android
+        shell: bash
+        run: |
+          AAB_PATH=$(find build-artifacts -name "*.aab" | head -1)
+          APK_PATH=$(find build-artifacts -name "*.apk" | head -1)
           echo "aab_path=$AAB_PATH" >> $GITHUB_OUTPUT
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
           echo "Found AAB: $AAB_PATH"
+          echo "Found APK: $APK_PATH"
 
       # TODO: Uncomment when Google Play Developer account is approved
       # - name: Decode Google Play Service Account
@@ -190,10 +210,11 @@ jobs:
       #     track: internal
       #     status: completed
 
-      - name: Upload Android AAB to GitHub Release
+      - name: Upload Android builds to GitHub Release
         if: matrix.target == 'android'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.release_config.outputs.tag }}
           files: |
-            ${{ steps.find_aab.outputs.aab_path }}
+            ${{ steps.find_android.outputs.aab_path }}
+            ${{ steps.find_android.outputs.apk_path }}
