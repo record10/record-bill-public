@@ -5,6 +5,11 @@
 #   - PRIVATE_REPO_PAT                   : Fine-grained PAT with Contents:Read on Pritraj/Record-Bill
 #   - TAURI_SIGNING_PRIVATE_KEY          : Tauri update signing key (~/.tauri/myshapkey.key)
 #   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD : Password for the signing key
+#   - ANDROID_KEYSTORE_BASE64            : Base64-encoded Android keystore
+#   - ANDROID_STORE_PASSWORD             : Keystore password
+#   - ANDROID_KEY_ALIAS                  : Key alias in keystore
+#   - ANDROID_KEY_PASSWORD               : Key password
+#   - GOOGLE_PLAY_SERVICE_ACCOUNT_BASE64 : Base64-encoded Google Play service account JSON key
 #
 name: Release
 
@@ -143,74 +148,52 @@ jobs:
           prerelease: ${{ steps.release_config.outputs.prerelease }}
 
       # ─── Android build (Windows) ───
-      - name: Decode Android Keystore
-        if: matrix.target == 'android'
-        shell: bash
-        run: |
-          TEMP_DIR="$(cygpath -u "${{ runner.temp }}" 2>/dev/null || echo "${{ runner.temp }}")"
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$TEMP_DIR/release.keystore"
-          ls -l "$TEMP_DIR/release.keystore"
-
-      - name: Configure Gradle Properties
-        if: matrix.target == 'android'
-        shell: bash
-        run: |
-          TEMP_DIR="$(cygpath -u "${{ runner.temp }}" 2>/dev/null || echo "${{ runner.temp }}")"
-
-          mkdir -p $HOME/.gradle
-          # Ensure newline at end of existing gradle.properties before appending
-          echo "" >> $HOME/.gradle/gradle.properties
-          echo "ANDROID_KEYSTORE_FILE=$TEMP_DIR/release.keystore" >> $HOME/.gradle/gradle.properties
-          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> $HOME/.gradle/gradle.properties
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $HOME/.gradle/gradle.properties
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $HOME/.gradle/gradle.properties
-
-          # Write to Project Root (tauri/gen/android/gradle.properties)
-          echo "" >> tauri/gen/android/gradle.properties
-          echo "ANDROID_KEYSTORE_FILE=$TEMP_DIR/release.keystore" >> tauri/gen/android/gradle.properties
-          echo "ANDROID_STORE_PASSWORD=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/gradle.properties
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/gradle.properties
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/gradle.properties
-
-          # Write keystore.properties (primary location for build.gradle.kts)
-          echo "storeFile=$TEMP_DIR/release.keystore" > tauri/gen/android/keystore.properties
-          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/keystore.properties
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/keystore.properties
-          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/keystore.properties
-
-          # Write to Tauri Root (tauri/keystore.properties) - File fallback
-          echo "storeFile=$TEMP_DIR/release.keystore" > tauri/keystore.properties
-          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/keystore.properties
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/keystore.properties
-          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/keystore.properties
-
-          # Write signing.properties to Android Project Root
-          echo "storeFile=$TEMP_DIR/release.keystore" > tauri/gen/android/signing.properties
-          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" >> tauri/gen/android/signing.properties
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> tauri/gen/android/signing.properties
-          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> tauri/gen/android/signing.properties
-
-      - name: Build Android APK
+      # build.gradle.kts reads ANDROID_KEYSTORE_BASE64 from env vars,
+      # decodes it to a temp .jks file, and configures signing automatically.
+      - name: Build Android AAB
         if: matrix.target == 'android'
         shell: bash
         run: |
           cd tauri
-          ../frontend/node_modules/.bin/tauri android build --target aarch64
+          ../frontend/node_modules/.bin/tauri android build --aab --target aarch64
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk-bundle
-          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          TAURI_ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
-          TAURI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          TAURI_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
 
-      - name: Upload Android APK
+      - name: Find AAB file
+        if: matrix.target == 'android'
+        id: find_aab
+        shell: bash
+        run: |
+          AAB_PATH=$(find tauri/gen/android/app/build/outputs/bundle -name "*.aab" | head -1)
+          echo "aab_path=$AAB_PATH" >> $GITHUB_OUTPUT
+          echo "Found AAB: $AAB_PATH"
+
+      # TODO: Uncomment when Google Play Developer account is approved
+      # - name: Decode Google Play Service Account
+      #   if: matrix.target == 'android'
+      #   shell: bash
+      #   run: |
+      #     TEMP_DIR="$(cygpath -u "${{ runner.temp }}" 2>/dev/null || echo "${{ runner.temp }}")"
+      #     echo "${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_BASE64 }}" | base64 --decode > "$TEMP_DIR/play-service-account.json"
+      #
+      # - name: Upload to Google Play Internal Testing
+      #   if: matrix.target == 'android'
+      #   uses: r0adkll/upload-google-play@v1
+      #   with:
+      #     serviceAccountJson: ${{ runner.temp }}/play-service-account.json
+      #     packageName: com.recordbill.desktop
+      #     releaseFiles: ${{ steps.find_aab.outputs.aab_path }}
+      #     track: internal
+      #     status: completed
+
+      - name: Upload Android AAB to GitHub Release
         if: matrix.target == 'android'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.release_config.outputs.tag }}
           files: |
-            tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+            ${{ steps.find_aab.outputs.aab_path }}
