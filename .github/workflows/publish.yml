@@ -156,7 +156,7 @@ jobs:
         shell: bash
         run: |
           cd tauri
-          ../frontend/node_modules/.bin/tauri android build --aab true --target aarch64
+          ../frontend/node_modules/.bin/tauri android build --aab --target aarch64
           mkdir -p ../build-artifacts
           find gen/android/app/build/outputs/bundle -name "*.aab" -exec mv {} ../build-artifacts/ \;
         env:
@@ -171,7 +171,7 @@ jobs:
         shell: bash
         run: |
           cd tauri
-          ../frontend/node_modules/.bin/tauri android build --apk true --target aarch64
+          ../frontend/node_modules/.bin/tauri android build --apk --target aarch64
           mkdir -p ../build-artifacts
           find gen/android/app/build/outputs/apk -name "*.apk" -exec mv {} ../build-artifacts/ \;
         env:
