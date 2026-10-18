@@ -78,19 +78,32 @@ jobs:
 
       # ─── Build frontend ───
       - name: Install frontend dependencies
-        run: npm install
-        working-directory: frontend
+        run: |
+          if [ -d "frontend" ]; then
+            cd frontend && npm install
+          else
+            npm install
+          fi
 
       - name: Build frontend
-        run: npm run build
-        working-directory: frontend
+        run: |
+          if [ -d "frontend" ]; then
+            cd frontend && npm run build
+          else
+            npm run build
+          fi
 
       # ─── Read version & config from tauri.conf.json ───
       - name: Get Version
         id: get_version
         shell: bash
         run: |
-          VERSION=$(grep '"version":' tauri/tauri.conf.json | head -n 1 | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+          TAURI_DIR="src-tauri"
+          if [ -d "tauri" ]; then
+            TAURI_DIR="tauri"
+          fi
+          echo "tauri_dir=$TAURI_DIR" >> $GITHUB_OUTPUT
+          VERSION=$(grep '"version":' "$TAURI_DIR/tauri.conf.json" | head -n 1 | awk -F: '{ print $2 }' | sed 's/[", ]//g')
           echo "Building version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -107,8 +120,8 @@ jobs:
             if [[ "$RUNNER_OS" == "Windows" ]]; then
               choco install jq -y
             fi
-            jq -s '.[0] * .[1]' tauri/tauri.conf.json tauri/tauri.conf.qa.json > tauri/tauri.conf.merged.json
-            mv tauri/tauri.conf.merged.json tauri/tauri.conf.json
+            jq -s '.[0] * .[1]' ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.qa.json > ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.merged.json
+            mv ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.merged.json ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json
           else
             echo "type=prod" >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
@@ -122,10 +135,10 @@ jobs:
         run: |
           # Rename gen/android so tauri-build doesn't try to write tauri.settings.gradle
           # (Windows env vars are case-insensitive, causing os error 3)
-          mv tauri/gen/android tauri/gen/_android_disabled
+          mv ${{ steps.get_version.outputs.tauri_dir }}/gen/android ${{ steps.get_version.outputs.tauri_dir }}/gen/_android_disabled
           # Remove deep-link config to prevent plugin panic on Windows
-          jq 'del(.plugins."deep-link")' tauri/tauri.conf.json > tauri/tauri.conf.temp.json
-          mv tauri/tauri.conf.temp.json tauri/tauri.conf.json
+          jq 'del(.plugins."deep-link")' ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json > ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.temp.json
+          mv ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.temp.json ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json
 
       # ─── Windows workaround (android only) ───
       - name: Remove deep-link config (Android on Windows)
@@ -133,8 +146,8 @@ jobs:
         shell: bash
         run: |
           # Remove deep-link config to prevent plugin panic on Windows
-          jq 'del(.plugins."deep-link")' tauri/tauri.conf.json > tauri/tauri.conf.temp.json
-          mv tauri/tauri.conf.temp.json tauri/tauri.conf.json
+          jq 'del(.plugins."deep-link")' ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json > ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.temp.json
+          mv ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.temp.json ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json
 
       # ─── Desktop build (macOS or Windows) ───
       - name: Build Tauri Desktop App
@@ -145,7 +158,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.GEN_PASSWORD }}
         with:
-          projectPath: tauri
+          projectPath: ${{ steps.get_version.outputs.tauri_dir }}
           tagName: ${{ steps.release_config.outputs.tag }}
           releaseName: "App ${{ steps.release_config.outputs.tag }}"
           releaseBody: "See the assets to download this version and install."
@@ -164,8 +177,18 @@ jobs:
         if: matrix.target == 'android'
         shell: bash
         run: |
-          cd tauri
-          ../frontend/node_modules/.bin/tauri android build --target aarch64
+          TAURI_DIR="src-tauri"
+          TAURI_BIN="node_modules/.bin/tauri"
+          if [ -d "tauri" ]; then
+            TAURI_DIR="tauri"
+            TAURI_BIN="../frontend/node_modules/.bin/tauri"
+          fi
+          cd "$TAURI_DIR"
+          if [ -f "$TAURI_BIN" ]; then
+            "$TAURI_BIN" android build --target aarch64
+          else
+            npx tauri android build --target aarch64
+          fi
           mkdir -p ../build-artifacts
         env:
           NDK_HOME: ${{ env.NDK_HOME }}
@@ -175,7 +198,7 @@ jobs:
         if: matrix.target == 'android'
         shell: bash
         run: |
-          UNSIGNED_APK=$(find tauri/gen/android -name "*.apk" -path "*release*" | head -1)
+          UNSIGNED_APK=$(find ${{ steps.get_version.outputs.tauri_dir }}/gen/android -name "*.apk" -path "*release*" 2>/dev/null | head -1)
           echo "Found APK: $UNSIGNED_APK"
           BUILD_TOOLS_DIR="${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | sort -V | tail -1)"
           ${BUILD_TOOLS_DIR}/zipalign -v 4 "$UNSIGNED_APK" /tmp/app-aligned.apk
@@ -192,7 +215,7 @@ jobs:
         if: matrix.target == 'android'
         shell: bash
         run: |
-          UNSIGNED_AAB=$(find tauri/gen/android -name "*.aab" -path "*release*" | head -1)
+          UNSIGNED_AAB=$(find ${{ steps.get_version.outputs.tauri_dir }}/gen/android -name "*.aab" -path "*release*" 2>/dev/null | head -1)
           echo "Found AAB: $UNSIGNED_AAB"
           jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
             -keystore /tmp/upload-keystore.jks \
