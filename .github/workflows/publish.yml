@@ -21,21 +21,55 @@ on:
         options:
           - qa
           - main
+      mac:
+        description: "Build macOS desktop"
+        type: boolean
+        default: true
+      windows:
+        description: "Build Windows desktop"
+        type: boolean
+        default: true
+      linux:
+        description: "Build Linux desktop"
+        type: boolean
+        default: true
+      android:
+        description: "Build Android (APK and AAB)"
+        type: boolean
+        default: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      has_jobs: ${{ steps.pick.outputs.has_jobs }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          items=()
+          [ "${{ inputs.mac }}" = "true" ] && items+=('{"platform":"macos-latest","target":"desktop"}')
+          [ "${{ inputs.windows }}" = "true" ] && items+=('{"platform":"windows-latest","target":"desktop"}')
+          [ "${{ inputs.linux }}" = "true" ] && items+=('{"platform":"ubuntu-22.04","target":"desktop"}')
+          [ "${{ inputs.android }}" = "true" ] && items+=('{"platform":"ubuntu-latest","target":"android"}')
+          if [ ${#items[@]} -eq 0 ]; then
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'has_jobs=false' >> "$GITHUB_OUTPUT"
+          else
+            joined=$(IFS=,; echo "${items[*]}")
+            echo "matrix={\"include\":[${joined}]}" >> "$GITHUB_OUTPUT"
+            echo 'has_jobs=true' >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: plan
+    if: needs.plan.outputs.has_jobs == 'true'
     permissions:
       contents: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            target: desktop
-          - platform: ubuntu-latest
-            target: android
-          - platform: windows-latest
-            target: desktop
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -45,6 +79,14 @@ jobs:
         run: |
           git clone --depth 1 --branch ${{ inputs.branch }} \
             https://x-access-token:${{ secrets.PRIVATE_REPO_PAT }}@github.com/Pritraj/record-bill.git .
+
+      # ─── Linux desktop system packages ───
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux' && matrix.target == 'desktop'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       # ─── Common setup ───
       - name: Install Node.js
@@ -149,7 +191,7 @@ jobs:
           jq 'del(.plugins."deep-link")' ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json > ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.temp.json
           mv ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.temp.json ${{ steps.get_version.outputs.tauri_dir }}/tauri.conf.json
 
-      # ─── Desktop build (macOS or Windows) ───
+      # ─── Desktop build (macOS, Windows or Linux) ───
       - name: Build Tauri Desktop App
         if: matrix.target == 'desktop'
         uses: tauri-apps/tauri-action@v0
@@ -162,7 +204,7 @@ jobs:
           tagName: ${{ steps.release_config.outputs.tag }}
           releaseName: "App ${{ steps.release_config.outputs.tag }}"
           releaseBody: "See the assets to download this version and install."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: ${{ steps.release_config.outputs.prerelease }}
 
       # ─── Decode Android keystore ───
